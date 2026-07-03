@@ -15,11 +15,9 @@ logfire.configure(token=os.getenv("LOGFIRE_TOKEN"), service_name="evals")
 # ─────────────────────────────────────────────────────────────────────────────
 import asyncio
 import json
-import nest_asyncio
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import streamlit as st
-
-nest_asyncio.apply()
 
 from evals.pipeline import run_pipeline, load_golden_dataset
 from evals.guardrails_eval import run_guardrails_eval, compute_guardrails_metrics
@@ -78,8 +76,15 @@ def _render_metric_table(df: pd.DataFrame, metric_col: str, title: str):
 
 
 def _run_async(coro):
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(coro)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # Streamlit may already own an event loop. Run eval coroutines in a small
+    # worker thread so we do not need nest_asyncio, which cannot patch uvloop.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(coro)).result()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
